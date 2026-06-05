@@ -2,7 +2,7 @@
     "name": "particle-academy/fancy-heuristics",
     "description": "Human + agent interaction analytics and Fancy UI pixel verification for Laravel hosts. Ingests collector events, aggregates heatmaps, and re-polls sites to verify the embedded badge stays visible.",
     "type": "library",
-    "version": "0.0.0",
+    "version": "0.1.0",
     "keywords": [
         "laravel",
         "analytics",
