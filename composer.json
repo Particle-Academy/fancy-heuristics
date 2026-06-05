@@ -1,0 +1,75 @@
+{
+    "name": "particle-academy/fancy-heuristics",
+    "description": "Human + agent interaction analytics and Fancy UI pixel verification for Laravel hosts. Ingests collector events, aggregates heatmaps, and re-polls sites to verify the embedded badge stays visible.",
+    "type": "library",
+    "version": "0.0.0",
+    "keywords": [
+        "laravel",
+        "analytics",
+        "heatmap",
+        "heuristics",
+        "pixel",
+        "verification",
+        "human-plus-ux",
+        "particle-academy"
+    ],
+    "license": "MIT",
+    "homepage": "https://github.com/Particle-Academy/fancy-heuristics",
+    "support": {
+        "issues": "https://github.com/Particle-Academy/fancy-heuristics/issues",
+        "source": "https://github.com/Particle-Academy/fancy-heuristics"
+    },
+    "authors": [
+        {
+            "name": "Particle Academy",
+            "homepage": "https://github.com/Particle-Academy"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^11.0|^12.0|^13.0",
+        "illuminate/contracts": "^11.0|^12.0|^13.0",
+        "illuminate/database": "^11.0|^12.0|^13.0",
+        "illuminate/events": "^11.0|^12.0|^13.0",
+        "illuminate/http": "^11.0|^12.0|^13.0",
+        "illuminate/routing": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "illuminate/validation": "^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.26",
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "FancyHeuristics\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "FancyHeuristics\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "FancyHeuristics\\HeuristicsServiceProvider"
+            ],
+            "aliases": {
+                "Heuristics": "FancyHeuristics\\Facades\\Heuristics"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
