@@ -1,5 +1,7 @@
 # Fancy Heuristics
 
+[![Fancified](art/fancified.svg)](https://particle.academy)
+
 `particle-academy/fancy-heuristics` is the PHP/Laravel ingestion + storage +
 query backend for **human + agent interaction analytics** and **Fancy UI pixel
 verification**. It is the server half of the Fancy Pixel / Fancy Heuristics
