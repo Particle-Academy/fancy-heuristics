@@ -283,7 +283,7 @@ class HeuristicsManager
             ->selectRaw('COALESCE(SUM(events), 0) as events')
             ->selectRaw('COALESCE(AVG(duration_ms), 0) as avg_duration_ms')
             ->selectRaw('COALESCE(AVG(events), 0) as avg_events')
-            ->selectRaw('SUM(CASE WHEN is_bounce = 1 THEN 1 ELSE 0 END) as bounces')
+            ->selectRaw('SUM(CASE WHEN is_bounce THEN 1 ELSE 0 END) as bounces')
             ->first();
 
         $sessions = (int) ($row->sessions ?? 0);
