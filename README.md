@@ -25,7 +25,7 @@ php artisan migrate
 Browser/agent clients flush JSON via `navigator.sendBeacon`:
 
 ```
-POST /heuristics/collect    { siteKey, sessionId, events: [ Event, ... ] }
+POST /heuristics/collect    { siteKey, sessionId, events: [ Event, ... ], context? }
 POST /heuristics/pixel      { siteKey, style, mode, visible, path, ts }
 
 Event = {
@@ -34,7 +34,21 @@ Event = {
   path, ts,
   x?, y?, vw?, vh?, scrollPct?, dwellMs?, targetId?, label?, meta?
 }
+
+// Once-per-session acquisition/audience context — sent on the FIRST batch only.
+context? = {
+  referrer?, utm?: { source?, medium?, campaign?, term?, content? },
+  lang?, tz?, screenW?, screenH?, dpr?
+}
 ```
+
+On `collect`, the package upserts a derived **session** row per
+`(siteKey, sessionId)`: acquisition (`referrer`/`referrer_host` + `utm_*`),
+audience (`device`/`os`/`browser` classified from the request User-Agent with a
+self-contained regex — no third-party UA parser — plus `lang`/`tz`/`screen_*`),
+and engagement (`pageviews`, `events`, `landing_path`/`exit_path`, `duration_ms`,
+`is_bounce`). The raw User-Agent is truncated and stored; the IP is never stored
+raw (pixel pings hash it).
 
 > **Cross-origin clients:** these endpoints are posted from browsers on other
 > origins. Exempt the route prefix from CSRF (`VerifyCsrfToken::$except`) or keep
@@ -47,12 +61,34 @@ Event = {
 use FancyHeuristics\Facades\Heuristics;
 
 Heuristics::record($event);                 // persist one event
-Heuristics::collect($payload);              // persist a { siteKey, events } batch
+Heuristics::collect($payload, $ua);         // persist a batch + upsert its session
 Heuristics::ping($ping);                    // persist a pixel liveness beacon
 Heuristics::heatmap($siteKey, $path);       // normalised grid of pointer/click hits
 Heuristics::events($siteKey, [...]);        // raw events, filtered
 Heuristics::sessionStats($siteKey);         // sessions + counts by actor & kind
 ```
+
+### GA-parity reports
+
+Each takes a `$site`, a date `$range`, and an optional `$actor` filter
+(`'human'`, `'agent'`, or `null` = all). `$range` is either an **int** (last N
+days) or `['from' => Carbon|string, 'to' => Carbon|string]` — both compared
+against the session's `started_at`. All return primitive, JSON-friendly arrays.
+
+```php
+Heuristics::acquisition($site, 30);                  // referrer hosts, utm, direct vs referral
+Heuristics::audience($site, 30);                     // device / browser / os / language
+Heuristics::timeseries($site, 30, 'day', false);     // sessions+pageviews per bucket (day|week|month)
+Heuristics::sessionsSummary($site, 30);              // totals, avg duration, bounce rate, pages/session
+Heuristics::topPages($site, 30);                     // top paths by pageviews
+Heuristics::entryPages($site, 30);                   // landing pages by session
+Heuristics::exitPages($site, 30);                    // exit pages by session
+Heuristics::topElements($site, 30);                  // most-clicked target_id / label
+Heuristics::realtime($site);                         // sessions active in the last 5 minutes
+```
+
+`timeseries(..., $splitActor: true)` adds `human_sessions` / `agent_sessions`
+to every bucket.
 
 ## Pixel verification
 

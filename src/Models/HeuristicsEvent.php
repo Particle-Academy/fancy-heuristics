@@ -26,6 +26,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $target_id
  * @property string|null $label
  * @property array<string, mixed>|null $meta
+ * @property string|null $ua
  * @property Carbon $occurred_at
  */
 class HeuristicsEvent extends Model
@@ -46,6 +47,7 @@ class HeuristicsEvent extends Model
         'target_id',
         'label',
         'meta',
+        'ua',
         'occurred_at',
     ];
 

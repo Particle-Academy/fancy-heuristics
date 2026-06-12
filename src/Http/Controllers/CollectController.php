@@ -20,7 +20,7 @@ class CollectController
     {
         $payload = $request->all();
 
-        $saved = $heuristics->collect($payload);
+        $saved = $heuristics->collect($payload, $request->userAgent());
 
         return new JsonResponse([
             'ok' => true,

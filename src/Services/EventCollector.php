@@ -9,6 +9,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 
+use function mb_substr;
+
 /**
  * Validates and persists batches of interaction events per the frozen wire
  * contract (POST {prefix}/collect):
@@ -28,6 +30,10 @@ class EventCollector
      */
     public const KINDS = ['pageview', 'click', 'scroll', 'pointer', 'dwell'];
 
+    public function __construct(
+        protected SessionRollup $sessions = new SessionRollup,
+    ) {}
+
     /**
      * Validate + persist a single event (already normalised or wire-shaped).
      */
@@ -43,23 +49,28 @@ class EventCollector
     }
 
     /**
-     * Validate + persist a full collect batch.
+     * Validate + persist a full collect batch, then roll the saved events up
+     * into their session row.
      *
-     * @param  array<string, mixed>  $payload  { siteKey, sessionId, events: [...] }
+     * @param  array<string, mixed>  $payload  { siteKey, sessionId, events: [...], context?: {...} }
+     * @param  string|null  $userAgent  Request User-Agent — stamped on each event + used to classify the session's device/os/browser.
      * @return Collection<int, HeuristicsEvent>
      */
-    public function collect(array $payload): Collection
+    public function collect(array $payload, ?string $userAgent = null): Collection
     {
         $validator = Validator::make($payload, [
             'siteKey' => ['required', 'string'],
             'sessionId' => ['nullable', 'string'],
             'events' => ['required', 'array'],
+            'context' => ['nullable', 'array'],
         ]);
 
         $validator->validate();
 
         $siteKey = (string) $payload['siteKey'];
         $sessionId = isset($payload['sessionId']) ? (string) $payload['sessionId'] : null;
+        $context = isset($payload['context']) && is_array($payload['context']) ? $payload['context'] : null;
+        $ua = $userAgent !== null && $userAgent !== '' ? mb_substr($userAgent, 0, 255) : null;
 
         $saved = new Collection;
 
@@ -69,9 +80,10 @@ class EventCollector
             }
 
             // Batch-level siteKey/sessionId flow down to each event unless the
-            // event carries its own.
+            // event carries its own. The request UA is stamped on every event.
             $event['siteKey'] = $event['siteKey'] ?? $siteKey;
             $event['sessionId'] = $event['sessionId'] ?? $sessionId;
+            $event['ua'] = $event['ua'] ?? $ua;
 
             $model = $this->record($event);
 
@@ -79,6 +91,8 @@ class EventCollector
                 $saved->push($model);
             }
         }
+
+        $this->sessions->rollUp($siteKey, $sessionId, $saved, $context, $ua);
 
         return $saved;
     }
@@ -128,6 +142,7 @@ class EventCollector
             'target_id' => isset($event['targetId']) ? (string) $event['targetId'] : ($event['target_id'] ?? null),
             'label' => isset($event['label']) ? (string) $event['label'] : null,
             'meta' => isset($event['meta']) && is_array($event['meta']) ? $event['meta'] : null,
+            'ua' => isset($event['ua']) && is_string($event['ua']) && $event['ua'] !== '' ? mb_substr($event['ua'], 0, 255) : null,
             'occurred_at' => $this->resolveTimestamp($event['ts'] ?? $event['occurred_at'] ?? null),
         ];
     }
