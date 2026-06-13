@@ -128,3 +128,9 @@ php artisan heuristics:verify-pixels --site=KEY # one site
 composer install
 vendor/bin/pest
 ```
+
+---
+
+## ⭐ Star Fancy UI
+
+If this package is useful to you, a quick ⭐ on the repo really helps us build a better kit. Thank you!
