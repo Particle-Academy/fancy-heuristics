@@ -1,6 +1,6 @@
 {
     "name": "particle-academy/fancy-heuristics",
-    "description": "Human + agent interaction analytics and Fancy UI pixel verification for Laravel hosts. Ingests collector events, aggregates heatmaps, and re-polls sites to verify the embedded badge stays visible.",
+    "description": "End-user optimization, not search-engine optimization — human + agent interaction analytics for Laravel hosts. Ingests collector events, aggregates focus heatmaps, rolls up sessions by actor, and re-polls sites to verify the embedded Fancy Pixel stays visible.",
     "type": "library",
     "keywords": [
         "laravel",

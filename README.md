@@ -2,6 +2,11 @@
 
 [![Fancified](art/fancified.svg)](https://particle.academy)
 
+> **End-user optimization, not search-engine optimization.** Understand and
+> improve what real humans *and agents* actually do on the page — clicks, focus
+> heatmaps, sessions, and the human-vs-agent split GA can't see — instead of
+> chasing rankings.
+
 `particle-academy/fancy-heuristics` is the PHP/Laravel ingestion + storage +
 query backend for **human + agent interaction analytics** and **Fancy UI pixel
 verification**. It is the server half of the Fancy Pixel / Fancy Heuristics
