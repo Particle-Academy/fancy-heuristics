@@ -40,17 +40,16 @@ if ($corsEnabled) {
     array_unshift($middleware, HandleHeuristicsCors::class);
 }
 
+// When CORS is on, the routes also answer OPTIONS so the preflight reaches the
+// CORS middleware (which short-circuits OPTIONS before the controller). This
+// uses Route::match with the controller class — NOT a separate closure route —
+// so `php artisan route:cache` can serialize it. (Closure routes are not
+// cacheable; route:cache silently drops them, which breaks preflight in prod.)
+$methods = $corsEnabled ? ['POST', 'OPTIONS'] : ['POST'];
+
 Route::prefix($prefix)
     ->middleware($middleware)
-    ->group(function () use ($corsEnabled) {
-        Route::post('collect', CollectController::class)->name('heuristics.collect');
-        Route::post('pixel', PixelController::class)->name('heuristics.pixel');
-
-        if ($corsEnabled) {
-            // Preflight targets — the request must match a route for the CORS
-            // middleware to run; HandleHeuristicsCors short-circuits OPTIONS, so
-            // these closures never actually execute.
-            Route::options('collect', fn () => response()->noContent());
-            Route::options('pixel', fn () => response()->noContent());
-        }
+    ->group(function () use ($methods) {
+        Route::match($methods, 'collect', CollectController::class)->name('heuristics.collect');
+        Route::match($methods, 'pixel', PixelController::class)->name('heuristics.pixel');
     });
