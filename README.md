@@ -56,9 +56,14 @@ and engagement (`pageviews`, `events`, `landing_path`/`exit_path`, `duration_ms`
 raw (pixel pings hash it).
 
 > **Cross-origin clients:** these endpoints are posted from browsers on other
-> origins. Exempt the route prefix from CSRF (`VerifyCsrfToken::$except`) or keep
-> them on the stateless `api` middleware group (the default). CORS headers are
-> the host's responsibility.
+> origins (every site that embeds the Fancy Pixel). They run on the stateless
+> `api` group (no CSRF 419) and, by default, ship CORS headers + answer the
+> OPTIONS preflight via the bundled `HandleHeuristicsCors` middleware — so a
+> fresh install works cross-origin with no extra setup. Restrict who may beacon
+> with `heuristics.routes.cors.allowed_origins`, or set
+> `heuristics.routes.cors.enabled` (env `HEURISTICS_ROUTE_CORS`) to `false` to
+> manage CORS yourself (e.g. Laravel's `config/cors.php`). Don't do both — two
+> layers would emit a duplicate `Access-Control-Allow-Origin`.
 
 ## Facade
 

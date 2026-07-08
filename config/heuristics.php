@@ -33,10 +33,18 @@ return [
     |--------------------------------------------------------------------------
     |
     | The collector posts batched events to `{prefix}/collect` and pixel
-    | liveness beacons to `{prefix}/pixel`. These are cross-origin clients,
-    | so the host MUST exempt the prefix from CSRF (VerifyCsrfToken $except)
-    | or mount them on a stateless `api` middleware group. The throttle
-    | limiter name below is registered by the service provider.
+    | liveness beacons to `{prefix}/pixel`. These are cross-origin clients, so
+    | they run on the stateless `api` middleware group (no CSRF 419) and, by
+    | default, ship CORS headers via HandleHeuristicsCors so browsers on other
+    | origins can beacon back without the host configuring config/cors.php.
+    |
+    | cors.enabled       — attach the CORS middleware + OPTIONS preflight routes.
+    |                      Turn OFF only if you manage CORS yourself (e.g. add
+    |                      the prefix to Laravel's config/cors.php) — running
+    |                      both would emit a duplicate Access-Control-Allow-Origin.
+    | cors.allowed_origins — ['*'] (default) replies '*' (correct for anonymous,
+    |                      credential-free telemetry). A concrete list echoes the
+    |                      request Origin only when it matches (+ Vary: Origin).
     |
     */
     'routes' => [
@@ -44,6 +52,11 @@ return [
         'prefix' => env('HEURISTICS_ROUTE_PREFIX', 'heuristics'),
         'middleware' => ['api'],
         'throttle' => env('HEURISTICS_THROTTLE', '120,1'),
+        'cors' => [
+            'enabled' => env('HEURISTICS_ROUTE_CORS', true),
+            'allowed_origins' => ['*'],
+            'max_age' => 86400,
+        ],
     ],
 
     /*
