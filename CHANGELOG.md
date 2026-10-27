@@ -15,6 +15,8 @@ upgrading.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
 ### Security
 
 - **Pixel verification could be pointed at your internal network (SSRF).**
