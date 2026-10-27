@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace FancyHeuristics\Tests;
 
+use FancyHeuristics\Contracts\HostResolver;
 use FancyHeuristics\Facades\Heuristics;
 use FancyHeuristics\HeuristicsServiceProvider;
+use FancyHeuristics\Tests\Support\FakeHostResolver;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -56,5 +58,8 @@ abstract class TestCase extends Orchestra
 
         // Array cache so the throttle middleware doesn't need a DB cache table.
         $app['config']->set('cache.default', 'array');
+
+        // Deterministic DNS: no test may depend on a live lookup.
+        $app->instance(HostResolver::class, new FakeHostResolver);
     }
 }

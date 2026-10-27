@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace FancyHeuristics\Services;
 
+use FancyHeuristics\Contracts\PageFetcher;
 use FancyHeuristics\Events\PixelVerificationFailed;
 use FancyHeuristics\Events\PixelVerificationPassed;
+use FancyHeuristics\Exceptions\UnsafeUrlException;
 use FancyHeuristics\Models\HeuristicsSite;
-use Illuminate\Support\Facades\Http;
 
 /**
  * Server-side re-poll of a registered site. Fetches the page HTML, runs the
@@ -15,11 +16,16 @@ use Illuminate\Support\Facades\Http;
  * persists the result on the HeuristicsSite, and fires
  * PixelVerificationPassed / PixelVerificationFailed so hosts can toggle a
  * listing's visibility.
+ *
+ * The page is fetched through the PageFetcher contract. The default,
+ * SafePageFetcher, refuses non-public targets: the site URL is supplied by
+ * whoever registered the site, so an unguarded fetch is an SSRF primitive.
  */
 class PixelVerifier
 {
     public function __construct(
         protected HeuristicsPixelDetector $detector,
+        protected ?PageFetcher $fetcher = null,
     ) {}
 
     /**
@@ -27,22 +33,21 @@ class PixelVerifier
      */
     public function verify(HeuristicsSite $site): bool
     {
-        $timeout = (int) config('heuristics.verify.timeout', 15);
-        $userAgent = (string) config('heuristics.verify.user_agent', 'FancyHeuristics-PixelVerifier/1.0');
+        $fetcher = $this->fetcher ?? app(PageFetcher::class);
 
         try {
-            $response = Http::timeout($timeout)
-                ->withHeaders(['User-Agent' => $userAgent])
-                ->get($site->url);
+            $page = $fetcher->fetch((string) $site->url);
+        } catch (UnsafeUrlException $e) {
+            return $this->fail($site, 'fetch refused: '.$e->getMessage());
         } catch (\Throwable $e) {
             return $this->fail($site, 'fetch failed: '.$e->getMessage());
         }
 
-        if (! $response->successful()) {
-            return $this->fail($site, 'HTTP '.$response->status());
+        if (! $page->successful()) {
+            return $this->fail($site, 'HTTP '.$page->status);
         }
 
-        $detected = $this->detector->detect((string) $response->body());
+        $detected = $this->detector->detect($page->body);
 
         return $detected
             ? $this->pass($site)

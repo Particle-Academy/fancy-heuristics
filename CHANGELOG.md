@@ -15,6 +15,49 @@ upgrading.
 
 ## [Unreleased]
 
+### Security
+
+- **Pixel verification could be pointed at your internal network (SSRF).**
+  `PixelVerifier` fetched each registered site's URL with Laravel's HTTP client
+  as given: any scheme the client accepted, any address, and redirects followed
+  automatically. Whoever registered a site could make your server send GET
+  requests to loopback, RFC 1918, link-local addresses including
+  `169.254.169.254` cloud metadata, CGNAT, and IPv6 ULA / link-local or
+  IPv4-mapped equivalents. They could do it directly, through a hostname that
+  resolves there, or through a redirect. Only pass/fail was exposed, so it was
+  blind, but it ran twice daily and on demand.
+
+  Fetches now go through `SafePageFetcher`:
+  - http/https only;
+  - every resolved address must be public;
+  - decimal, octal and hex IPv4 spellings are refused;
+  - the connection is pinned to the validated address via `CURLOPT_RESOLVE`,
+    which closes DNS rebinding;
+  - redirects are followed by hand, at most `verify.max_redirects` (default
+    3), and each hop is re-checked and re-pinned;
+  - the body is capped on the wire at `verify.max_bytes` (default 2 MB).
+
+  **What you must do:** nothing, unless a registered site legitimately lives on
+  a private address, for example a staging host on your LAN. Its verification
+  now fails with `fetch refused: …`. To allow it, implement
+  `FancyHeuristics\Contracts\PageFetcher` with your own policy and set
+  `heuristics.verify.fetcher` to that class, or rebind the contract.
+
+### Added
+
+- `FancyHeuristics\Contracts\PageFetcher`, the seam the verifier fetches
+  through, plus `heuristics.verify.fetcher` to select an implementation.
+- `FancyHeuristics\Contracts\HostResolver`: DNS resolution for the fetcher,
+  rebindable for tests or custom resolution.
+- `verify.max_redirects` and `verify.max_bytes` config keys
+  (`HEURISTICS_VERIFY_MAX_REDIRECTS`, `HEURISTICS_VERIFY_MAX_BYTES`).
+
+### Changed
+
+- `PixelVerifier`'s constructor takes an optional `PageFetcher` as a second
+  argument. Existing `new PixelVerifier($detector)` calls keep working and
+  resolve the bound fetcher.
+
 ## 0.4.0 — 2026-08-07
 
 ### Changed

@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace FancyHeuristics;
 
 use FancyHeuristics\Console\Commands\VerifyPixelsCommand;
+use FancyHeuristics\Contracts\HostResolver;
+use FancyHeuristics\Contracts\PageFetcher;
 use FancyHeuristics\Services\EventCollector;
 use FancyHeuristics\Services\HeatmapAggregator;
+use FancyHeuristics\Services\SafePageFetcher;
+use FancyHeuristics\Support\DnsHostResolver;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -40,6 +44,24 @@ class HeuristicsServiceProvider extends ServiceProvider
         });
 
         $this->app->alias('heuristics', HeuristicsManager::class);
+
+        $this->app->bindIf(HostResolver::class, DnsHostResolver::class);
+
+        // The verifier's fetcher. Hosts override it with
+        // `heuristics.verify.fetcher` or by rebinding PageFetcher; whatever
+        // they bind takes over the SSRF guarantees SafePageFetcher gives.
+        $this->app->bindIf(PageFetcher::class, function ($app) {
+            $class = config('heuristics.verify.fetcher') ?: SafePageFetcher::class;
+            $fetcher = $app->make($class);
+
+            if (! $fetcher instanceof PageFetcher) {
+                throw new \InvalidArgumentException(
+                    'heuristics.verify.fetcher must implement '.PageFetcher::class.", got {$class}"
+                );
+            }
+
+            return $fetcher;
+        });
     }
 
     public function boot(): void

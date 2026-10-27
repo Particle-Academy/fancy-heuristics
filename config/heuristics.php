@@ -104,5 +104,18 @@ return [
         'cron' => env('HEURISTICS_VERIFY_CRON', '0 3,15 * * *'),
         'timeout' => (int) env('HEURISTICS_VERIFY_TIMEOUT', 15),
         'user_agent' => env('HEURISTICS_VERIFY_UA', 'FancyHeuristics-PixelVerifier/1.0'),
+
+        // Site URLs are supplied by whoever registers a site, so the default
+        // fetcher (SafePageFetcher) only reaches public http(s) addresses,
+        // re-checks every redirect hop and pins each connection to the
+        // address it validated. These bound the work one site can cost.
+        'max_redirects' => (int) env('HEURISTICS_VERIFY_MAX_REDIRECTS', 3),
+        'max_bytes' => (int) env('HEURISTICS_VERIFY_MAX_BYTES', 2_000_000),
+
+        // A class implementing FancyHeuristics\Contracts\PageFetcher, for a
+        // host that needs a different fetch policy (an egress proxy, an
+        // allowlist). null = SafePageFetcher. Whatever you set owns the SSRF
+        // guarantees from then on.
+        'fetcher' => null,
     ],
 ];

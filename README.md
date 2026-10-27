@@ -127,6 +127,36 @@ php artisan heuristics:verify-pixels            # all sites
 php artisan heuristics:verify-pixels --site=KEY # one site
 ```
 
+### Fetch safety
+
+A site's URL is supplied by whoever registered it, and the verifier fetches it
+from your server, so the default fetcher (`SafePageFetcher`) only reaches the
+public internet:
+
+- `http` / `https` only, no credentials in the URL, canonical hosts only
+  (decimal / octal / hex IPv4 spellings are refused);
+- every address the host resolves to must be public: no loopback, RFC 1918,
+  link-local or cloud metadata (`169.254.169.254`), CGNAT, multicast, reserved,
+  IPv6 ULA / link-local, or IPv4-mapped forms of those;
+- the connection is pinned to the address it validated (`CURLOPT_RESOLVE`),
+  so DNS rebinding cannot swap it between the check and the connect;
+- redirects are followed by hand, at most `verify.max_redirects` (3), and each
+  hop is checked and pinned again;
+- the body is capped at `verify.max_bytes` (2 MB) on the wire, and
+  `verify.timeout` still applies.
+
+A refusal is a failed verification with the reason `fetch refused: …`.
+
+If you need a different policy (an egress proxy, an allowlist), implement
+`FancyHeuristics\Contracts\PageFetcher` and set `heuristics.verify.fetcher` to
+your class, or rebind the contract in a service provider. Your fetcher then owns
+these guarantees.
+
+Residual gaps: the pin is a cURL option, so it does not apply if your app
+routes Laravel's HTTP client through a non-cURL handler (without the cURL
+extension the fetcher refuses rather than fetch unpinned); and if the process
+has `HTTP_PROXY` / `HTTPS_PROXY` set, the proxy resolves the name itself.
+
 ## Tests
 
 ```bash
