@@ -22,8 +22,10 @@ class HeatmapAggregator
     public const POINTER_KINDS = ['pointer', 'click'];
 
     /**
-     * Build a heatmap for a site/path.
+     * Build a heatmap for a site/path, optionally limited to an occurred_at
+     * range ([from, to]).
      *
+     * @param  array{0: \DateTimeInterface, 1: \DateTimeInterface}|null  $range
      * @return array{
      *     site_key: string,
      *     path: string,
@@ -33,7 +35,7 @@ class HeatmapAggregator
      *     cells: list<array{x:int, y:int, count:int, weight:float}>
      * }
      */
-    public function aggregate(string $siteKey, string $path, ?int $gridSize = null): array
+    public function aggregate(string $siteKey, string $path, ?int $gridSize = null, ?array $range = null): array
     {
         $gridSize = $gridSize ?? (int) config('heuristics.heatmap.grid_size', 24);
         $gridSize = max(1, $gridSize);
@@ -42,13 +44,21 @@ class HeatmapAggregator
         $buckets = [];
         $sampleCount = 0;
 
-        $events = HeuristicsEvent::query()
+        $query = HeuristicsEvent::query()
             ->where('site_key', $siteKey)
             ->where('path', $path)
             ->whereIn('kind', self::POINTER_KINDS)
             ->whereNotNull('x')
             ->whereNotNull('y')
-            ->get(['x', 'y', 'vw', 'vh']);
+            ->select(['id', 'x', 'y', 'vw', 'vh']);
+
+        if ($range !== null) {
+            $query->whereBetween('occurred_at', $range);
+        }
+
+        // Streamed in pages, so a busy path never loads every sample into
+        // memory at once.
+        $events = $query->lazyById(2000);
 
         foreach ($events as $event) {
             $cell = $this->bucketFor($event, $gridSize);

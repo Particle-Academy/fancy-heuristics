@@ -8,6 +8,7 @@ use FancyHeuristics\Models\HeuristicsEvent;
 use FancyHeuristics\Models\HeuristicsSession;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Upserts the per-session rollup row off each collect batch.
@@ -41,74 +42,95 @@ class SessionRollup
             return null;
         }
 
-        /** @var HeuristicsSession $session */
-        $session = HeuristicsSession::query()->firstOrNew([
-            'site_key' => $siteKey,
-            'session_id' => $sessionId,
-        ]);
-
-        $isNew = ! $session->exists;
-
-        // Timestamps span of this batch.
-        $occurredAt = $events
-            ->map(fn ($e) => $e->occurred_at)
-            ->filter()
-            ->sort()
+        // Order by when things happened, not by where they sat in the array.
+        // sortBy is stable, so events with the same timestamp keep array order.
+        $ordered = $events
+            ->sortBy(fn (HeuristicsEvent $e) => $e->occurred_at?->getTimestampMs() ?? 0)
             ->values();
 
-        $batchFirst = $occurredAt->first() ?? Carbon::now();
-        $batchLast = $occurredAt->last() ?? $batchFirst;
+        /** @var HeuristicsEvent $first */
+        $first = $ordered->first();
+        /** @var HeuristicsEvent $last */
+        $last = $ordered->last();
+        $batchFirst = $first->occurred_at ?? Carbon::now();
+        $batchLast = $last->occurred_at ?? $batchFirst;
 
-        // First-sight, immutable acquisition + audience context.
-        if ($isNew) {
-            $session->started_at = $batchFirst;
-            $session->landing_path = $events->first()?->path;
+        return DB::transaction(function () use ($siteKey, $sessionId, $ordered, $first, $last, $batchFirst, $batchLast, $context, $userAgent) {
+            $table = (new HeuristicsSession)->getTable();
 
-            $this->applyContext($session, $context ?? []);
-            $this->applyUserAgent($session, $userAgent);
-        }
+            // First sight: insert the row with its immutable acquisition and
+            // audience context. If a concurrent batch inserted it first, the
+            // unique (site_key, session_id) key makes this a no-op.
+            $fresh = new HeuristicsSession([
+                'site_key' => $siteKey,
+                'session_id' => $sessionId,
+                'actor' => $first->actor ?: 'human',
+                'started_at' => $batchFirst,
+                'last_event_at' => $batchFirst,
+                'landing_path' => $first->path,
+                'exit_path' => $first->path,
+                'duration_ms' => 0,
+                'pageviews' => 0,
+                'events' => 0,
+                'is_bounce' => true,
+            ]);
+            $this->applyContext($fresh, $context ?? []);
+            $this->applyUserAgent($fresh, $userAgent);
+            $fresh->created_at = $fresh->updated_at = Carbon::now();
 
-        // Actor: latest non-empty wins (an agent taking over flips the session).
-        $latestActor = $events->last()?->actor;
-        if ($latestActor !== null && $latestActor !== '') {
-            $session->actor = $latestActor;
-        } elseif ($isNew) {
-            $session->actor = 'human';
-        }
+            DB::table($table)->insertOrIgnore($fresh->getAttributes());
 
-        // Engagement rollups.
-        $pageviewsThisBatch = $events->where('kind', 'pageview')->count();
+            // Lock the row for the rest of the transaction, so two batches for
+            // one session cannot interleave their read and write.
+            /** @var HeuristicsSession $session */
+            $session = HeuristicsSession::query()
+                ->where('site_key', $siteKey)
+                ->where('session_id', $sessionId)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $session->events = (int) $session->events + $events->count();
-        $session->pageviews = (int) $session->pageviews + $pageviewsThisBatch;
+            $startedAt = $session->started_at;
+            $lastAt = $session->last_event_at;
+            $extra = ['updated_at' => Carbon::now()];
 
-        // last_event_at only ever moves forward.
-        $existingLast = $session->last_event_at;
-        $session->last_event_at = ($existingLast && $existingLast->greaterThan($batchLast))
-            ? $existingLast
-            : $batchLast;
+            // A batch that starts earlier than anything seen moves the start
+            // and the landing page back (a late beacon from the first page).
+            if ($startedAt === null || $batchFirst->lessThan($startedAt)) {
+                $startedAt = $batchFirst;
+                $extra['started_at'] = $batchFirst;
+                $extra['landing_path'] = $first->path;
+            }
 
-        // exit_path = path of the latest event this batch (if any carried one).
-        $latestPath = $events->last()?->path;
-        if ($latestPath !== null && $latestPath !== '') {
-            $session->exit_path = $latestPath;
-        }
+            // Only a batch that reaches further forward moves the exit page,
+            // the last-event time and the actor.
+            if ($lastAt === null || $batchLast->greaterThanOrEqualTo($lastAt)) {
+                $lastAt = $batchLast;
+                $extra['last_event_at'] = $batchLast;
+                $extra['exit_path'] = $last->path;
+                if ($last->actor !== null && $last->actor !== '') {
+                    $extra['actor'] = $last->actor;
+                }
+            }
 
-        // Duration = last_event_at − started_at (never negative).
-        if ($session->started_at && $session->last_event_at) {
-            $session->duration_ms = (int) max(
-                0,
-                $session->started_at->diffInMilliseconds($session->last_event_at),
-            );
-        }
+            $extra['duration_ms'] = (int) max(0, $startedAt->diffInMilliseconds($lastAt));
 
-        // Bounce: a single pageview and shallow engagement (≤1 interaction beyond it).
-        $session->is_bounce = $session->pageviews <= 1
-            && ($session->events - $session->pageviews) <= 1;
+            $addEvents = $ordered->count();
+            $addPageviews = $ordered->where('kind', 'pageview')->count();
+            $events = (int) $session->events + $addEvents;
+            $pageviews = (int) $session->pageviews + $addPageviews;
 
-        $session->save();
+            // Bounce: a single pageview and shallow engagement (≤1 interaction beyond it).
+            $extra['is_bounce'] = $pageviews <= 1 && ($events - $pageviews) <= 1;
 
-        return $session;
+            // Counters are incremented in SQL, never written back from a value
+            // read earlier.
+            DB::table($table)->where('id', $session->getKey())->incrementEach([
+                'events' => $addEvents,
+                'pageviews' => $addPageviews,
+            ], $extra);
+
+            return $session->refresh();
+        });
     }
 
     /**

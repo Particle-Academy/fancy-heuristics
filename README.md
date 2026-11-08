@@ -72,11 +72,44 @@ use FancyHeuristics\Facades\Heuristics;
 
 Heuristics::record($event);                 // persist one event
 Heuristics::collect($payload, $ua);         // persist a batch + upsert its session
+Heuristics::ingest($payload, $ua);          // same, and returns accepted / rejected-by-index
 Heuristics::ping($ping);                    // persist a pixel liveness beacon
-Heuristics::heatmap($siteKey, $path);       // normalised grid of pointer/click hits
+Heuristics::heatmap($siteKey, $path, null, 30); // normalised grid of pointer/click hits (range optional)
 Heuristics::events($siteKey, [...]);        // raw events, filtered
-Heuristics::sessionStats($siteKey);         // sessions + counts by actor & kind
+Heuristics::sessionStats($siteKey, 30);     // sessions + counts by actor & kind (range optional)
+Heuristics::prune();                        // delete data past its retention window
 ```
+
+### Ingest limits
+
+`POST {prefix}/collect` is public, so every batch is bounded
+(`heuristics.limits`): events per batch, key and path lengths, label length,
+`meta` keys and bytes (flat scalars only), coordinates, scroll percentage,
+dwell, and timestamp skew. Paths are stored without their query string or
+fragment. A bad envelope is a `422`; a bad event is skipped and reported:
+
+```json
+{ "ok": true, "replayed": false, "accepted": 4, "rejected": 1,
+  "errors": [{ "index": 2, "code": "invalid_path" }] }
+```
+
+The response never echoes a submitted value. The events and their session
+rollup are written in one transaction.
+
+### Retention
+
+```bash
+php artisan heuristics:prune --dry-run   # counts per data class, deletes nothing
+php artisan heuristics:prune             # delete
+```
+
+Windows come from `heuristics.retention_days` (raw events, 90) and
+`heuristics.retention.*` (pointer samples 14, pixel pings 90, sessions 395,
+ingest receipts 7). Schedule it daily. These are product defaults, not legal
+advice.
+
+Pixel pings store `HMAC-SHA256(key, ip)`, never the IP. The key is
+`heuristics.ip_hash_key`, defaulting to the app key.
 
 ### GA-parity reports
 

@@ -56,6 +56,9 @@ abstract class TestCase extends Orchestra
             'prefix' => '',
         ]);
 
+        // Pixel IP hashes are keyed by the app key; a real host always has one.
+        $app['config']->set('app.key', 'base64:'.base64_encode(str_repeat('k', 32)));
+
         // Array cache so the throttle middleware doesn't need a DB cache table.
         $app['config']->set('cache.default', 'array');
 

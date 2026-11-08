@@ -3,8 +3,12 @@
 declare(strict_types=1);
 
 use FancyHeuristics\Models\HeuristicsEvent;
+use Illuminate\Support\Carbon;
 
 it('persists a batch of events posted to the collect endpoint', function () {
+    // The public endpoint refuses timestamps outside the configured skew.
+    Carbon::setTestNow(Carbon::createFromTimestampMs(1_717_000_000_000));
+
     $response = $this->postJson('/heuristics/collect', [
         'siteKey' => 'showcase',
         'sessionId' => 'sess-abc',
@@ -38,6 +42,8 @@ it('persists a batch of events posted to the collect endpoint', function () {
     expect($pointer->actor)->toBe('agent');
     expect($pointer->x)->toBe(100);
     expect($pointer->vw)->toBe(1000);
+
+    Carbon::setTestNow();
 });
 
 it('skips malformed events but keeps the valid ones in a batch', function () {

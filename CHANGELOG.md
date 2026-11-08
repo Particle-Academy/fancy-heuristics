@@ -15,6 +15,59 @@ upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **`php artisan heuristics:prune`** (and `Heuristics::prune()`) enforces
+  retention. `retention_days` was advisory until now: nothing deleted
+  anything. Defaults: raw events 90 days, pointer samples 14, pixel pings 90,
+  sessions 395 (by last activity). `--dry-run` prints the counts and deletes
+  nothing. **What you must do:** schedule it daily if you want the windows
+  enforced; until you do, nothing is deleted, exactly as before.
+- **Ingest limits** under `heuristics.limits`: events per batch (500), key
+  length (128), path length (255), legacy label length (120), `meta` keys (16)
+  and bytes (2048), coordinate range, scroll percentage 0 to 100, dwell 0 to 1
+  hour, and timestamp skew (1 day ahead, 30 days back).
+- **`Heuristics::ingest()`** returns accepted and rejected counts plus
+  `errors: [{index, code}]`. `collect()` is unchanged.
+- **Optional range** on `sessionStats($site, $range)` and
+  `heatmap($site, $path, $grid, $range)`. With no range they behave as
+  before.
+- An index on `heuristics_events (site_key, session_id, occurred_at)`. Run
+  `php artisan migrate`.
+
+### Changed
+
+- **The collect response** is now
+  `{ ok, replayed, accepted, rejected, errors }`. `ok` and `accepted` keep
+  their meaning, so a client that read them needs no change.
+- **BREAKING (public endpoint only): events outside the limits are now
+  rejected** instead of stored. That covers a path or label over the bound,
+  `meta` that is nested or over its caps, impossible numbers, and a `ts` more
+  than a day ahead or 30 days behind the server clock. **What you must do:**
+  nothing, unless you post historical events through `/collect`. The facade
+  (`Heuristics::collect()` / `record()`) does not apply the skew check, so
+  server-side imports keep working.
+- **Paths are stored without their query string or fragment**, on every
+  path. They carried reset tokens and per-visit state. Per-path reports now
+  merge `/a?x=1` and `/a?x=2` into `/a`.
+- **Legacy labels have their whitespace collapsed** and are cut to 120
+  characters.
+- **The session rollup is ordered by timestamp, not by position in the
+  batch.** A late beacon from an earlier page now moves the landing page back
+  and never overwrites the exit page. Counters are incremented in SQL under a
+  row lock, and the events and their rollup are written in one transaction,
+  so concurrent batches for one session can no longer lose an increment.
+- The heatmap streams its samples in pages instead of loading every row.
+
+### Security
+
+- **Pixel IP hashes are now keyed.** They were a bare SHA-256 of the IP,
+  which anyone with the table can reverse by hashing every IPv4 address. They
+  are now HMAC-SHA256 under `heuristics.ip_hash_key`, which defaults to the
+  app key. If no key exists at all, no hash is stored. Hashes written before
+  this release cannot be compared with new ones; prune them with
+  `heuristics:prune` once they age out.
+
 ## [0.5.0] - 2026-10-27
 
 ### Security

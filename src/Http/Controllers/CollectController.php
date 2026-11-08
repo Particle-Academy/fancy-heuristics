@@ -13,18 +13,16 @@ use Illuminate\Http\Request;
  *
  * Cross-origin clients flush here via navigator.sendBeacon, so the host must
  * exempt this route from CSRF or mount it on stateless `api` middleware.
+ *
+ * Responds 202 `{ ok, replayed, accepted, rejected, errors: [{index, code}] }`.
+ * An invalid envelope is a 422. Submitted values are never echoed.
  */
 class CollectController
 {
     public function __invoke(Request $request, HeuristicsManager $heuristics): JsonResponse
     {
-        $payload = $request->all();
+        $result = $heuristics->ingest($request->all(), $request->userAgent(), public: true);
 
-        $saved = $heuristics->collect($payload, $request->userAgent());
-
-        return new JsonResponse([
-            'ok' => true,
-            'accepted' => $saved->count(),
-        ], 202);
+        return new JsonResponse($result->toResponse(), 202);
     }
 }

@@ -9,6 +9,8 @@ use FancyHeuristics\Models\HeuristicsPixelPing;
 use FancyHeuristics\Models\HeuristicsSession;
 use FancyHeuristics\Services\EventCollector;
 use FancyHeuristics\Services\HeatmapAggregator;
+use FancyHeuristics\Services\RetentionPruner;
+use FancyHeuristics\Support\IngestResult;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -24,6 +26,7 @@ class HeuristicsManager
     public function __construct(
         protected EventCollector $collector,
         protected HeatmapAggregator $heatmaps,
+        protected RetentionPruner $retention = new RetentionPruner,
     ) {}
 
     /**
@@ -46,6 +49,29 @@ class HeuristicsManager
     public function collect(array $payload, ?string $userAgent = null): Collection
     {
         return $this->collector->collect($payload, $userAgent);
+    }
+
+    /**
+     * Persist a collect batch and report what was rejected and why.
+     * `$public` applies the limits meant for anonymous callers (timestamp
+     * skew); the HTTP endpoint sets it, trusted server code need not.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function ingest(array $payload, ?string $userAgent = null, bool $public = false): IngestResult
+    {
+        return $this->collector->ingest($payload, $userAgent, $public);
+    }
+
+    /**
+     * Delete data past its retention window. Returns the rows removed (or, on
+     * a dry run, the rows that would be removed) per data class.
+     *
+     * @return array<string, int>
+     */
+    public function prune(bool $dryRun = false): array
+    {
+        return $this->retention->prune($dryRun);
     }
 
     /**
@@ -72,9 +98,14 @@ class HeuristicsManager
      *
      * @return array<string, mixed>
      */
-    public function heatmap(string $siteKey, string $path, ?int $gridSize = null): array
+    public function heatmap(string $siteKey, string $path, ?int $gridSize = null, int|array|null $range = null): array
     {
-        return $this->heatmaps->aggregate($siteKey, $path, $gridSize);
+        return $this->heatmaps->aggregate(
+            $siteKey,
+            $path,
+            $gridSize,
+            $range !== null ? $this->resolveRange($range) : null,
+        );
     }
 
     /**
@@ -119,9 +150,15 @@ class HeuristicsManager
      *     by_kind: array<string, int>
      * }
      */
-    public function sessionStats(string $siteKey): array
+    public function sessionStats(string $siteKey, int|array|null $range = null): array
     {
         $base = HeuristicsEvent::query()->where('site_key', $siteKey);
+
+        // No range keeps the historical behaviour (every event). Pass one on
+        // any table that can grow: unbounded, this scans the whole site.
+        if ($range !== null) {
+            $base->whereBetween('occurred_at', $this->resolveRange($range));
+        }
 
         $byActor = (clone $base)
             ->selectRaw('actor, COUNT(*) as aggregate')

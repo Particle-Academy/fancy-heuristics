@@ -61,15 +61,67 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Event retention
+    | Ingest limits
     |--------------------------------------------------------------------------
     |
-    | Days to keep raw events / pixel pings. Pruning is the host's job (call
-    | the models' ::query()->where('occurred_at', '<', ...)->delete()); this
-    | value is exposed so a scheduled prune can read it.
+    | The collect endpoint is public: anyone who knows a site key can post to
+    | it. Every limit below bounds what one request can store. A batch that
+    | breaks an envelope limit (event count, key length) is refused with 422.
+    | An event that breaks a per-event limit is rejected on its own, and the
+    | response lists it by index and code. Submitted values are never echoed.
+    |
+    */
+    'limits' => [
+        'max_events_per_batch' => (int) env('HEURISTICS_MAX_EVENTS_PER_BATCH', 500),
+        'max_key_length' => 128,          // siteKey, sessionId, batchId, eventId
+        'max_path_length' => 255,         // after the query string and fragment are removed
+        'max_label_length' => 120,        // legacy v1 label
+        'max_target_id_length' => 128,    // legacy v1 targetId
+        'max_meta_keys' => 16,
+        'max_meta_bytes' => 2048,         // JSON-encoded size of meta / props
+        'max_future_skew_seconds' => 86_400,
+        'max_past_skew_seconds' => 30 * 86_400,
+        'max_dwell_ms' => 3_600_000,      // one engagement chunk
+        'max_coordinate' => 100_000,      // x, y, vw, vh in CSS pixels
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retention
+    |--------------------------------------------------------------------------
+    |
+    | Enforced by `php artisan heuristics:prune` (add `--dry-run` to see the
+    | counts first). Schedule it daily:
+    |
+    |   $schedule->command('heuristics:prune')->daily();
+    |
+    | retention_days     — raw events of every kind.
+    | retention.*        — shorter windows for high-volume or derived data.
+    | These are product defaults, not legal advice: choose windows that suit
+    | your users and jurisdiction.
     |
     */
     'retention_days' => (int) env('HEURISTICS_RETENTION_DAYS', 90),
+
+    'retention' => [
+        'pointer_days' => (int) env('HEURISTICS_RETENTION_POINTER_DAYS', 14),
+        'pings_days' => (int) env('HEURISTICS_RETENTION_PINGS_DAYS', 90),
+        'sessions_days' => (int) env('HEURISTICS_RETENTION_SESSIONS_DAYS', 395),
+        'receipts_days' => (int) env('HEURISTICS_RETENTION_RECEIPTS_DAYS', 7),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pixel IP hashing key
+    |--------------------------------------------------------------------------
+    |
+    | Pixel pings store HMAC-SHA256(key, ip), never the IP. A bare SHA-256 of
+    | an IPv4 address can be reversed by trying all four billion of them, so
+    | the hash is keyed. null = the application key. Rotating the key makes
+    | old and new hashes incomparable, which is the point of rotating it.
+    |
+    */
+    'ip_hash_key' => env('HEURISTICS_IP_HASH_KEY'),
 
     /*
     |--------------------------------------------------------------------------

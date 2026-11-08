@@ -129,6 +129,9 @@ it('does not create a session row for a batch without a sessionId', function () 
 });
 
 it('passes the request UA through the collect endpoint into the session', function () {
+    // The public endpoint refuses timestamps outside the configured skew.
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::createFromTimestampMs(1_717_000_000_000));
+
     $this->withHeaders(['User-Agent' => CHROME_WIN_UA])
         ->postJson('/heuristics/collect', [
             'siteKey' => 'showcase',
@@ -143,4 +146,6 @@ it('passes the request UA through the collect endpoint into the session', functi
     $session = HeuristicsSession::where('session_id', 'http-sess')->first();
     expect($session->browser)->toBe('Chrome');
     expect($session->referrer_host)->toBe('news.ycombinator.com');
+
+    \Illuminate\Support\Carbon::setTestNow();
 });
