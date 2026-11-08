@@ -147,7 +147,8 @@ class HeuristicsManager
      *     sessions: int,
      *     events: int,
      *     by_actor: array<string, int>,
-     *     by_kind: array<string, int>
+     *     by_kind: array<string, int>,
+     *     by_name: array<string, int>
      * }
      */
     public function sessionStats(string $siteKey, int|array|null $range = null): array
@@ -174,12 +175,22 @@ class HeuristicsManager
             ->map(fn ($v) => (int) $v)
             ->all();
 
+        $byName = (clone $base)
+            ->whereNotNull('name')
+            ->selectRaw('name, COUNT(*) as aggregate')
+            ->groupBy('name')
+            ->orderBy('name')
+            ->pluck('aggregate', 'name')
+            ->map(fn ($v) => (int) $v)
+            ->all();
+
         return [
             'site_key' => $siteKey,
             'sessions' => (int) (clone $base)->distinct()->count('session_id'),
             'events' => (int) (clone $base)->count(),
             'by_actor' => $byActor,
             'by_kind' => $byKind,
+            'by_name' => $byName,
         ];
     }
 
@@ -341,10 +352,12 @@ class HeuristicsManager
 
     /**
      * Top pages by pageview count across all events in range (every path seen,
-     * not just landing/exit). Ranked by pageviews then unique sessions.
+     * not just landing/exit). Ranked by pageviews then unique sessions. Each
+     * row carries the most recent title and route pattern seen for the path
+     * (null for paths only ever recorded by a v1 producer).
      *
      * @param  int|array{from?: Carbon|string, to?: Carbon|string}  $range
-     * @return list<array{path: string, pageviews: int, sessions: int}>
+     * @return list<array{path: string, pageviews: int, sessions: int, title: string|null, route_pattern: string|null}>
      */
     public function topPages(string $site, int|array $range, ?string $actor = null, int $limit = 20): array
     {
@@ -368,10 +381,34 @@ class HeuristicsManager
             ->limit($limit)
             ->get();
 
+        // Latest title / pattern per returned path. Grouped, so the rows read
+        // are bounded by the distinct titles, not by the pageviews.
+        $latest = [];
+        if ($rows->isNotEmpty()) {
+            $titles = HeuristicsEvent::query()
+                ->where('site_key', $site)
+                ->where('kind', 'pageview')
+                ->whereBetween('occurred_at', [$from, $to])
+                ->whereIn('path', $rows->pluck('path')->all())
+                ->where(fn (Builder $q) => $q->whereNotNull('title')->orWhere('schema_version', '>=', 2))
+                ->selectRaw('path, title, route_pattern, MAX(occurred_at) as last_seen')
+                ->groupBy('path', 'title', 'route_pattern')
+                ->get();
+
+            foreach ($titles as $t) {
+                $prev = $latest[$t->path] ?? null;
+                if ($prev === null || (string) $t->last_seen > (string) $prev->last_seen) {
+                    $latest[$t->path] = $t;
+                }
+            }
+        }
+
         return $rows->map(fn ($row) => [
             'path' => (string) $row->path,
             'pageviews' => (int) $row->pageviews,
             'sessions' => (int) $row->sessions,
+            'title' => isset($latest[$row->path]) && $latest[$row->path]->title !== null ? (string) $latest[$row->path]->title : null,
+            'route_pattern' => isset($latest[$row->path]) && $latest[$row->path]->route_pattern !== null ? (string) $latest[$row->path]->route_pattern : null,
         ])->all();
     }
 
@@ -398,40 +435,117 @@ class HeuristicsManager
     }
 
     /**
-     * Most-clicked elements by target_id / label, from click events in range.
+     * Most-activated controls, from human clicks in range (`ui.activate`).
+     *
+     * v2 rows group by component, part, instance, role and accessible name.
+     * v1 rows group by their target_id and label and are marked `legacy`:
+     * their labels were often a container's text, so a dashboard should say
+     * so rather than mix them in. Clicks with no target are kept (they used to
+     * be dropped, which hid most clicks). Agent activity is not a click and is
+     * not counted here.
+     *
+     * `target_id` and `label` are kept for 0.5 callers: for a v2 row they are
+     * the instance (or '') and the accessible name.
      *
      * @param  int|array{from?: Carbon|string, to?: Carbon|string}  $range
-     * @return list<array{target_id: string, label: string|null, clicks: int}>
+     * @return list<array{
+     *     component: string|null, part: string|null, instance: string|null,
+     *     role: string|null, name: string|null, legacy: bool,
+     *     target_id: string, label: string|null, clicks: int
+     * }>
      */
     public function topElements(string $site, int|array $range, ?string $actor = null, int $limit = 20): array
     {
         [$from, $to] = $this->resolveRange($range);
 
+        $base = function () use ($site, $from, $to, $actor): Builder {
+            $query = HeuristicsEvent::query()
+                ->where('site_key', $site)
+                ->where('kind', 'click')
+                ->whereBetween('occurred_at', [$from, $to]);
+
+            if ($actor !== null) {
+                $query->where('actor', $actor);
+            }
+
+            return $query;
+        };
+
+        $current = $base()
+            ->where('schema_version', '>=', 2)
+            ->selectRaw('component, part, instance, role, target_name, COUNT(*) as clicks')
+            ->groupBy('component', 'part', 'instance', 'role', 'target_name')
+            ->orderByDesc('clicks')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'component' => $row->component !== null ? (string) $row->component : null,
+                'part' => $row->part !== null ? (string) $row->part : null,
+                'instance' => $row->instance !== null ? (string) $row->instance : null,
+                'role' => $row->role !== null ? (string) $row->role : null,
+                'name' => $row->target_name !== null ? (string) $row->target_name : null,
+                'legacy' => false,
+                'target_id' => $row->instance !== null ? (string) $row->instance : '',
+                'label' => $row->target_name !== null ? (string) $row->target_name : null,
+                'clicks' => (int) $row->clicks,
+            ]);
+
+        $legacy = $base()
+            ->where(fn (Builder $q) => $q->where('schema_version', '<', 2)->orWhereNull('schema_version'))
+            ->selectRaw('target_id, label, COUNT(*) as clicks')
+            ->groupBy('target_id', 'label')
+            ->orderByDesc('clicks')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'component' => null,
+                'part' => null,
+                'instance' => null,
+                'role' => null,
+                'name' => null,
+                'legacy' => true,
+                'target_id' => $row->target_id !== null ? (string) $row->target_id : '',
+                'label' => $row->label !== null ? (string) $row->label : null,
+                'clicks' => (int) $row->clicks,
+            ]);
+
+        return $current->concat($legacy)
+            ->sortByDesc('clicks')
+            ->take($limit)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Event counts by `<domain>.<verb>` name in range.
+     *
+     * @param  int|array{from?: Carbon|string, to?: Carbon|string}  $range
+     * @return list<array{name: string, events: int, sessions: int}>
+     */
+    public function eventNames(string $site, int|array $range, ?string $actor = null, int $limit = 50): array
+    {
         $query = HeuristicsEvent::query()
             ->where('site_key', $site)
-            ->where('kind', 'click')
-            ->whereNotNull('target_id')
-            ->where('target_id', '!=', '')
-            ->whereBetween('occurred_at', [$from, $to]);
+            ->whereNotNull('name')
+            ->whereBetween('occurred_at', $this->resolveRange($range));
 
         if ($actor !== null) {
             $query->where('actor', $actor);
         }
 
-        $rows = $query
-            ->selectRaw('target_id')
-            ->selectRaw('MAX(label) as label')
-            ->selectRaw('COUNT(*) as clicks')
-            ->groupBy('target_id')
-            ->orderByDesc('clicks')
+        return $query
+            ->selectRaw('name, COUNT(*) as events, COUNT(DISTINCT session_id) as sessions')
+            ->groupBy('name')
+            ->orderByDesc('events')
+            ->orderBy('name')
             ->limit($limit)
-            ->get();
-
-        return $rows->map(fn ($row) => [
-            'target_id' => (string) $row->target_id,
-            'label' => $row->label !== null ? (string) $row->label : null,
-            'clicks' => (int) $row->clicks,
-        ])->all();
+            ->get()
+            ->map(fn ($row) => [
+                'name' => (string) $row->name,
+                'events' => (int) $row->events,
+                'sessions' => (int) $row->sessions,
+            ])
+            ->all();
     }
 
     /**

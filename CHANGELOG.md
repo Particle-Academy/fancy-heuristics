@@ -15,8 +15,36 @@ upgrading.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-08
+
+Upgrade order: this server first, then `@particle-academy/fancy-heuristics-js`
+0.4, then `@particle-academy/fancy-pixel` 0.4. This server accepts both wire
+formats, so nothing breaks while producers catch up. Run `php artisan migrate`.
+
 ### Added
 
+- **Wire format v2** on the same `/collect` route. A batch with
+  `schemaVersion: 2` is idempotent by `batchId` (a replay returns the first
+  result with `replayed: true` and stores nothing) and each event by
+  `eventId`. Events carry a `<domain>.<verb>` `name`, the route name and
+  pattern, the page title (kept on `ui.view` only), a structured target
+  (`component`, `part`, `instance`, `role`, `target_name`) and bounded
+  scalar `props`. New columns on `heuristics_events` and a new
+  `heuristics_ingest_receipts` table; old columns are untouched.
+- **An event-name registry** (`FancyHeuristics\Support\EventNames`). An
+  unregistered name is rejected with `unknown_name`; add your own names in
+  `heuristics.names`.
+- **`php artisan heuristics:backfill-taxonomy`** maps rows stored before this
+  release onto the names, using the same mapping as ingest. `--dry-run`
+  reports counts, including how many legacy labels look like container text;
+  `--site=` limits it to one site; it asks before writing in production. It
+  only touches rows with no name, so a second run changes nothing.
+- **`Heuristics::eventNames($site, $range)`** and `by_name` in
+  `sessionStats()`.
+- **`topPages()` rows carry `title` and `route_pattern`** (the most recent
+  seen for the path).
+- Ingest receipts are pruned by `heuristics:prune` after
+  `retention.receipts_days` (7).
 - **`php artisan heuristics:prune`** (and `Heuristics::prune()`) enforces
   retention. `retention_days` was advisory until now: nothing deleted
   anything. Defaults: raw events 90 days, pointer samples 14, pixel pings 90,
@@ -37,6 +65,23 @@ upgrading.
 
 ### Changed
 
+- **BREAKING (report shape): `topElements()` is rebuilt on the activated
+  control.** v2 rows group by component, part, instance, role and name. v1
+  rows group by target_id and label and are marked `legacy: true`. Clicks
+  with no target are no longer dropped (on the showcase that was every
+  click). It used `MAX(label)`, the alphabetically largest label, for each
+  group; it no longer does. **What you must do:** nothing if you read
+  `target_id`, `label` and `clicks`: they are still there, with `target_id`
+  now `''` when there is no target. Read `component`, `part`, `instance`,
+  `name` and `legacy` to show the new fields.
+- **BREAKING (data): agent clicks are stored as kind `agent`, not `click`,**
+  with name `agent.tool` (from the relay) or `agent.act`. They no longer
+  count in click totals, Elements or heatmaps. **What you must do:** if a
+  report of yours counted agent activity through `kind = 'click'`, read
+  `name LIKE 'agent.%'` instead. Run `heuristics:backfill-taxonomy` to apply
+  the same change to stored rows.
+- v1 events now also get a name and a derived route pattern, and a v1 label
+  is copied to `props.legacy_label`. It is never used as a target name.
 - **The collect response** is now
   `{ ok, replayed, accepted, rejected, errors }`. `ok` and `accepted` keep
   their meaning, so a client that read them needs no change.

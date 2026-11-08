@@ -49,6 +49,19 @@ class HeuristicsEvent extends Model
         'meta',
         'ua',
         'occurred_at',
+        // wire v2
+        'schema_version',
+        'event_id',
+        'name',
+        'route_name',
+        'route_pattern',
+        'title',
+        'component',
+        'part',
+        'instance',
+        'role',
+        'target_name',
+        'props',
     ];
 
     public function getTable(): string
@@ -69,6 +82,8 @@ class HeuristicsEvent extends Model
             'scroll_pct' => 'float',
             'dwell_ms' => 'integer',
             'meta' => 'array',
+            'props' => 'array',
+            'schema_version' => 'integer',
             'occurred_at' => 'datetime',
         ];
     }

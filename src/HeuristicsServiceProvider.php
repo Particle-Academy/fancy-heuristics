@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FancyHeuristics;
 
+use FancyHeuristics\Console\Commands\BackfillTaxonomyCommand;
 use FancyHeuristics\Console\Commands\PruneCommand;
 use FancyHeuristics\Console\Commands\VerifyPixelsCommand;
 use FancyHeuristics\Contracts\HostResolver;
@@ -116,6 +117,7 @@ class HeuristicsServiceProvider extends ServiceProvider
         $this->commands([
             VerifyPixelsCommand::class,
             PruneCommand::class,
+            BackfillTaxonomyCommand::class,
         ]);
     }
 }

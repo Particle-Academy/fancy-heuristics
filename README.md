@@ -80,6 +80,45 @@ Heuristics::sessionStats($siteKey, 30);     // sessions + counts by actor & kind
 Heuristics::prune();                        // delete data past its retention window
 ```
 
+### Wire v2 and the event names
+
+`/collect` accepts two wire formats on the same route. A batch with
+`schemaVersion: 2` carries a `batchId` (a replay returns the first result with
+`replayed: true` and stores nothing), and each event carries an `eventId`
+(stored once per site) and a `<domain>.<verb>` `name`:
+
+| Domain | Names |
+|---|---|
+| `ui` | `ui.view`, `ui.activate`, `ui.change`, `ui.submit`, `ui.open`, `ui.close`, `ui.copy` |
+| `engage` | `engage.time` (active time), `engage.scroll` (milestones) |
+| `pointer` | `pointer.sample` |
+| `agent` | `agent.act`, `agent.tool` |
+| reserved | `error.*`, `perf.vitals`, `friction.*`, `feature.*` |
+
+A name that is not registered is rejected (`unknown_name`). Register your own
+in `heuristics.names`. v2 events store the route name and pattern, the page
+title (on `ui.view` only), and the activated control as `component`, `part`,
+`instance`, `role` and `target_name`, each bounded. With no pattern from the
+host, one is derived from the path (numeric, UUID and long hex segments become
+`:id`).
+
+v1 producers keep working and are mapped at ingest: `pageview` to `ui.view`,
+`click` to `ui.activate`, `dwell` to `engage.time`, `scroll` to
+`engage.scroll`, `pointer` to `pointer.sample`. An agent click becomes
+`agent.tool` (from the relay, `meta.via = "relay"`) or `agent.act`, and is
+stored with kind `agent`, so it no longer counts as a click. A v1 label is
+kept as `props.legacy_label` and never becomes a target name.
+
+Rows stored before this release can be mapped the same way:
+
+```bash
+php artisan heuristics:backfill-taxonomy --dry-run   # counts, writes nothing
+php artisan heuristics:backfill-taxonomy             # asks first in production
+```
+
+Count rows per kind on the real database before running it, and size
+`--chunk` from that count.
+
 ### Ingest limits
 
 `POST {prefix}/collect` is public, so every batch is bounded
@@ -126,7 +165,8 @@ Heuristics::sessionsSummary($site, 30);              // totals, avg duration, bo
 Heuristics::topPages($site, 30);                     // top paths by pageviews
 Heuristics::entryPages($site, 30);                   // landing pages by session
 Heuristics::exitPages($site, 30);                    // exit pages by session
-Heuristics::topElements($site, 30);                  // most-clicked target_id / label
+Heuristics::topElements($site, 30);                  // most-activated controls (component · part · instance · name)
+Heuristics::eventNames($site, 30);                   // event counts by <domain>.<verb> name
 Heuristics::realtime($site);                         // sessions active in the last 5 minutes
 ```
 

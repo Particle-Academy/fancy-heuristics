@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FancyHeuristics\Services;
 
 use FancyHeuristics\Models\HeuristicsEvent;
+use FancyHeuristics\Support\EventNames;
 use FancyHeuristics\Support\IngestResult;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -41,6 +42,9 @@ class EventCollector
      */
     protected bool $enforceSkew = false;
 
+    /** The batch's declared wire version (1 when absent). */
+    protected int $batchSchema = 1;
+
     public function __construct(
         protected SessionRollup $sessions = new SessionRollup,
     ) {}
@@ -52,6 +56,7 @@ class EventCollector
     public function record(array $event): ?HeuristicsEvent
     {
         $this->enforceSkew = false;
+        $this->batchSchema = 1;
         [$normalised] = $this->normalise($event);
 
         if ($normalised === null) {
@@ -86,10 +91,31 @@ class EventCollector
         $sessionId = isset($payload['sessionId']) ? (string) $payload['sessionId'] : null;
         $context = isset($payload['context']) && is_array($payload['context']) ? $payload['context'] : null;
         $ua = $userAgent !== null && $userAgent !== '' ? mb_substr($userAgent, 0, 255) : null;
+        $batchId = isset($payload['batchId']) ? (string) $payload['batchId'] : null;
+        $this->batchSchema = (int) ($payload['schemaVersion'] ?? 1);
 
-        return DB::transaction(function () use ($payload, $siteKey, $sessionId, $context, $ua) {
+        return DB::transaction(function () use ($payload, $siteKey, $sessionId, $context, $ua, $batchId) {
+            // Claim the batch first. The unique (site_key, batch_id) key makes a
+            // concurrent or later replay a no-op that returns the first result.
+            if ($batchId !== null) {
+                $claimed = DB::table($this->receiptsTable())->insertOrIgnore([
+                    'site_key' => $siteKey,
+                    'batch_id' => $batchId,
+                    'schema_version' => $this->batchSchema,
+                    'received_at' => Carbon::now(),
+                ]);
+
+                if ($claimed === 0) {
+                    return $this->replayed($siteKey, $batchId);
+                }
+            }
+
             $saved = new Collection;
             $errors = [];
+
+            // Event ids already stored for this site: a replayed event is
+            // harmless even when it arrives in a different batch.
+            $seen = $this->storedEventIds($siteKey, $payload['events']);
 
             foreach (array_values($payload['events']) as $index => $event) {
                 if (! is_array($event)) {
@@ -112,13 +138,84 @@ class EventCollector
                     continue;
                 }
 
+                $eventId = $normalised['event_id'] ?? null;
+                if ($eventId !== null) {
+                    if (isset($seen[$eventId])) {
+                        $errors[] = ['index' => $index, 'code' => 'duplicate'];
+
+                        continue;
+                    }
+                    $seen[$eventId] = true;
+                }
+
                 $saved->push(HeuristicsEvent::create($normalised));
             }
 
             $this->sessions->rollUp($siteKey, $sessionId, $saved, $context, $ua);
 
+            if ($batchId !== null) {
+                DB::table($this->receiptsTable())
+                    ->where('site_key', $siteKey)
+                    ->where('batch_id', $batchId)
+                    ->update([
+                        'accepted' => $saved->count(),
+                        'rejected' => count($errors),
+                        'errors' => json_encode($errors),
+                    ]);
+            }
+
             return new IngestResult($saved, $errors);
         });
+    }
+
+    protected function receiptsTable(): string
+    {
+        return config('heuristics.table_prefix', 'heuristics_').'ingest_receipts';
+    }
+
+    /**
+     * The stored result of a batch seen before.
+     */
+    protected function replayed(string $siteKey, string $batchId): IngestResult
+    {
+        $receipt = DB::table($this->receiptsTable())
+            ->where('site_key', $siteKey)
+            ->where('batch_id', $batchId)
+            ->first();
+
+        $errors = json_decode((string) ($receipt->errors ?? '[]'), true);
+
+        return new IngestResult(
+            new Collection,
+            is_array($errors) ? array_values($errors) : [],
+            replayed: true,
+            acceptedCount: (int) ($receipt->accepted ?? 0),
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $events
+     * @return array<string, true>
+     */
+    protected function storedEventIds(string $siteKey, array $events): array
+    {
+        $ids = [];
+        foreach ($events as $event) {
+            if (is_array($event) && isset($event['eventId']) && is_string($event['eventId']) && $event['eventId'] !== '') {
+                $ids[] = mb_substr($event['eventId'], 0, $this->limit('max_key_length', 128));
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return HeuristicsEvent::query()
+            ->where('site_key', $siteKey)
+            ->whereIn('event_id', array_values(array_unique($ids)))
+            ->pluck('event_id')
+            ->mapWithKeys(fn ($id) => [(string) $id => true])
+            ->all();
     }
 
     /**
@@ -131,6 +228,8 @@ class EventCollector
         Validator::make($payload, [
             'siteKey' => ['required', 'string', 'max:'.$maxKey],
             'sessionId' => ['nullable', 'string', 'max:'.$maxKey],
+            'schemaVersion' => ['nullable', 'integer', 'in:1,2'],
+            'batchId' => ['nullable', 'string', 'max:'.$maxKey],
             'events' => ['required', 'array', 'max:'.$this->limit('max_events_per_batch', 500)],
             'context' => ['nullable', 'array'],
         ])->validate();
@@ -144,14 +243,177 @@ class EventCollector
      */
     protected function normalise(array $event): array
     {
+        $isV2 = array_key_exists('name', $event) || $this->batchSchema === 2;
+
+        return $isV2 ? $this->normaliseV2($event) : $this->normaliseV1($event);
+    }
+
+    /**
+     * A v1 event: validated as before, then mapped to its v2 name. The v1
+     * label is bounded and also kept as props.legacy_label; it never becomes
+     * a target name.
+     *
+     * @param  array<string, mixed>  $event
+     * @return array{0: array<string, mixed>|null, 1: string|null}
+     */
+    protected function normaliseV1(array $event): array
+    {
         $kind = $event['kind'] ?? null;
-        $siteKey = $event['siteKey'] ?? $event['site_key'] ?? null;
 
         if (! is_string($kind) || ! in_array($kind, self::KINDS, true)) {
             return [null, 'invalid_kind'];
         }
 
-        $path = $this->normalisePath($event['path'] ?? null);
+        [$common, $code] = $this->common($event, $event['path'] ?? null);
+        if ($common === null) {
+            return [null, $code];
+        }
+
+        $meta = $this->boundedScalarMap($event['meta'] ?? null);
+        if ($meta === false) {
+            return [null, 'invalid_meta'];
+        }
+
+        $targetId = $event['targetId'] ?? $event['target_id'] ?? null;
+        $label = $this->boundedText($event['label'] ?? null, $this->limit('max_label_length', 120));
+
+        [$name, $storedKind, $props] = EventNames::fromV1($kind, $common['actor'], $meta, $label);
+
+        return [[
+            ...$common,
+            'schema_version' => 1,
+            'name' => $name,
+            'kind' => $storedKind,
+            'route_pattern' => EventNames::patternFromPath($common['path']),
+            'target_id' => is_scalar($targetId) && (string) $targetId !== ''
+                ? mb_substr((string) $targetId, 0, $this->limit('max_target_id_length', 128))
+                : null,
+            'label' => $label,
+            'meta' => $meta,
+            'props' => $props,
+        ], null];
+    }
+
+    /**
+     * A wire-v2 event: a registered `<domain>.<verb>` name, the route and
+     * title as separate fields, a structured target and bounded props.
+     *
+     * @param  array<string, mixed>  $event
+     * @return array{0: array<string, mixed>|null, 1: string|null}
+     */
+    protected function normaliseV2(array $event): array
+    {
+        $name = $event['name'] ?? null;
+        if (! EventNames::isWellFormed($name)) {
+            return [null, 'invalid_name'];
+        }
+        if (! EventNames::isRegistered($name)) {
+            return [null, 'unknown_name'];
+        }
+
+        $route = is_array($event['route'] ?? null) ? $event['route'] : [];
+
+        [$common, $code] = $this->common($event, $event['path'] ?? $route['path'] ?? null);
+        if ($common === null) {
+            return [null, $code];
+        }
+
+        $props = $this->boundedScalarMap($event['props'] ?? null);
+        if ($props === false) {
+            return [null, 'invalid_props'];
+        }
+
+        $target = $this->target($event['target'] ?? null);
+        if ($target === false) {
+            return [null, 'invalid_target'];
+        }
+
+        $routeName = $this->boundedHandle($route['name'] ?? null, 128);
+        $routePattern = $this->boundedHandle($route['pattern'] ?? null, 255);
+
+        $eventId = $event['eventId'] ?? null;
+
+        return [[
+            ...$common,
+            ...$target,
+            'schema_version' => 2,
+            'event_id' => is_string($eventId) && $eventId !== '' ? mb_substr($eventId, 0, $this->limit('max_key_length', 128)) : null,
+            'name' => $name,
+            'kind' => EventNames::kindFor($name),
+            'route_name' => $routeName,
+            'route_pattern' => $routePattern ?? EventNames::patternFromPath($common['path']),
+            // The title is page-level: kept on views only, never on a click.
+            'title' => $name === 'ui.view' ? $this->boundedText($event['title'] ?? null, 120) : null,
+            'props' => $props,
+        ], null];
+    }
+
+    /**
+     * The structured target. False when present but malformed.
+     *
+     * @return array{component: ?string, part: ?string, instance: ?string, role: ?string, target_name: ?string}|false
+     */
+    protected function target(mixed $target): array|false
+    {
+        $empty = ['component' => null, 'part' => null, 'instance' => null, 'role' => null, 'target_name' => null];
+
+        if ($target === null) {
+            return $empty;
+        }
+
+        if (! is_array($target)) {
+            return false;
+        }
+
+        $component = $target['component'] ?? 'none';
+        $part = $target['part'] ?? null;
+        $role = $target['role'] ?? null;
+
+        foreach ([$component, $part, $role] as $handle) {
+            if ($handle !== null && ! $this->isSlug($handle)) {
+                return false;
+            }
+        }
+
+        $instance = $target['instance'] ?? null;
+        if ($instance !== null && ! is_scalar($instance)) {
+            return false;
+        }
+
+        return [
+            'component' => $component,
+            'part' => $part,
+            'instance' => $instance !== null && (string) $instance !== '' ? mb_substr((string) $instance, 0, 128) : null,
+            'role' => $role !== null ? mb_substr($role, 0, 32) : null,
+            'target_name' => $this->boundedText($target['name'] ?? null, 60),
+        ];
+    }
+
+    protected function isSlug(mixed $value): bool
+    {
+        return is_string($value)
+            && $value !== ''
+            && strlen($value) <= 64
+            && preg_match('/^[A-Za-z0-9_.:-]+$/D', $value) === 1;
+    }
+
+    protected function boundedHandle(mixed $value, int $max): ?string
+    {
+        return is_string($value) && $value !== '' ? mb_substr($value, 0, $max) : null;
+    }
+
+    /**
+     * Fields every event shares, v1 or v2: site, session, actor, path,
+     * timestamp, numbers, UA.
+     *
+     * @param  array<string, mixed>  $event
+     * @return array{0: array<string, mixed>|null, 1: string|null}
+     */
+    protected function common(array $event, mixed $rawPath): array
+    {
+        $siteKey = $event['siteKey'] ?? $event['site_key'] ?? null;
+
+        $path = $this->normalisePath($rawPath);
         if ($path === null) {
             return [null, 'invalid_path'];
         }
@@ -170,31 +432,20 @@ class EventCollector
             return [null, 'invalid_number'];
         }
 
-        $meta = $this->boundedScalarMap($event['meta'] ?? null);
-        if ($meta === false) {
-            return [null, 'invalid_meta'];
-        }
-
+        // Public ingestion accepts human and agent; anything else is human.
         $actor = $event['actor'] ?? 'human';
         if (! in_array($actor, ['human', 'agent'], true)) {
             $actor = 'human';
         }
 
         $sessionId = $event['sessionId'] ?? $event['session_id'] ?? null;
-        $targetId = $event['targetId'] ?? $event['target_id'] ?? null;
 
         return [[
             'site_key' => $siteKey,
             'session_id' => is_scalar($sessionId) ? mb_substr((string) $sessionId, 0, $this->limit('max_key_length', 128)) : null,
             'actor' => $actor,
-            'kind' => $kind,
             'path' => $path,
             ...$numbers,
-            'target_id' => is_scalar($targetId) && (string) $targetId !== ''
-                ? mb_substr((string) $targetId, 0, $this->limit('max_target_id_length', 128))
-                : null,
-            'label' => $this->boundedText($event['label'] ?? null, $this->limit('max_label_length', 120)),
-            'meta' => $meta,
             'ua' => isset($event['ua']) && is_string($event['ua']) && $event['ua'] !== '' ? mb_substr($event['ua'], 0, 255) : null,
             'occurred_at' => $occurredAt,
         ], null];
