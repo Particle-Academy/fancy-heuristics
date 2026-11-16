@@ -36,6 +36,16 @@ dataset('detection cases', [
     // 3. The wordmark.
     'wordmark text' => ['<footer>Powered by Fancy UI</footer>', true],
     'wordmark spaced/cased' => ['POWERED   by   fancy   ui', true],
+    'old wordmark mid-sentence' => ['Powered by Fancy UI and friends', true],
+    // The renamed wordmark (2026-11-15: the pixel now says "Powered by Fancy").
+    // Both names verify through the transition, so sites that still carry the
+    // old text keep passing.
+    'new wordmark' => ['<footer>Powered by Fancy</footer>', true],
+    'new wordmark at end of text' => ['Powered by Fancy', true],
+    'new wordmark with punctuation' => ['Powered by Fancy.', true],
+    'some other Fancy brand' => ['Powered by Fancy Feast', false],
+    'a longer word' => ['Powered by Fancypants', false],
+    'a hyphenated name' => ['Powered by Fancy-Cats', false],
     // Negatives.
     'unrelated html' => ['<div>nothing here</div>', false],
     'partial wordmark' => ['Powered by something else', false],

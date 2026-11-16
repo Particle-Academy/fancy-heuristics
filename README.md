@@ -177,7 +177,8 @@ to every bucket.
 
 `heuristics_sites` registers each site to re-poll. The verifier fetches the URL
 server-side and runs the **shared detection** — the stable `data-fancy-badge`
-marker **or** the literal "Powered by Fancy UI" wordmark (the exact same two
+marker **or** the literal wordmark, "Powered by Fancy" or the older "Powered by
+Fancy UI" (the exact same two
 signals the showcase's `ScanShowcaseSubmission` scanner uses, kept in one place
 in `HeuristicsPixelDetector`). It updates `visible` / `pixel_status` /
 `last_verified_at` and fires `PixelVerificationPassed` / `PixelVerificationFailed`

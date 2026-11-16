@@ -15,9 +15,16 @@ upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **The detector accepts the new badge wordmark, "Powered by Fancy".** `fancy-pixel`
+  renders it from its next release. The old "Powered by Fancy UI" still verifies,
+  so sites that carry it keep passing; nothing to do. The new form has to end at
+  "Fancy", so "Powered by Fancy Feast" is not read as the badge.
+
 ### Changed
 
-- Rebranded the display name to Fancy Dev Kit (for SaaSy Agents) in the README, badge and package description. The "Powered by Fancy UI" wordmark the badge renders and the detector matches is unchanged, as are package names, the npm scope and URLs, so nothing to do.
+- Rebranded the display name to Fancy Dev Kit (for SaaSy Agents) in the README, badge and package description. Package names, the npm scope and URLs are unchanged, so nothing to do.
 
 ## [0.6.0] - 2026-11-08
 
