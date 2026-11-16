@@ -15,6 +15,10 @@ upgrading.
 
 ## [Unreleased]
 
+### Changed
+
+- Rebranded the display name to Fancy Dev Kit (for SaaSy Agents) in the README, badge and package description. The "Powered by Fancy UI" wordmark the badge renders and the detector matches is unchanged, as are package names, the npm scope and URLs, so nothing to do.
+
 ## [0.6.0] - 2026-11-08
 
 Upgrade order: this server first, then `@particle-academy/fancy-heuristics-js`

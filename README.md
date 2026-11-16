@@ -8,7 +8,7 @@
 > chasing rankings.
 
 `particle-academy/fancy-heuristics` is the PHP/Laravel ingestion + storage +
-query backend for **human + agent interaction analytics** and **Fancy UI pixel
+query backend for **human + agent interaction analytics** and **Fancy Dev Kit pixel
 verification**. It is the server half of the Fancy Pixel / Fancy Heuristics
 trio (paired with the `@particle-academy/fancy-pixel` badge embed and the
 `@particle-academy/fancy-heuristics-js` browser collector).
@@ -239,7 +239,7 @@ vendor/bin/pest
 
 ---
 
-## ⭐ Star Fancy UI
+## ⭐ Star Fancy Dev Kit
 
 If this package is useful to you, a quick ⭐ on the repo really helps us build a better kit. Thank you!
 
