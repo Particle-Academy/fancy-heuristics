@@ -25,6 +25,7 @@ upgrading.
 ### Changed
 
 - Rebranded the display name to Fancy Dev Kit (for SaaSy Agents) in the README, badge and package description. Package names, the npm scope and URLs are unchanged, so nothing to do.
+- **Docs:** `AGENTS.md` added: the guide to using this package (install, its entries on the Fancy MCP catalog server, API essentials, traps). `CONTRIBUTING.md` added for the contributor notes, with `CLAUDE.md` as a symlink to it. The README points to the MCP server and to `AGENTS.md`. No code changed; nothing to do.
 
 ## [0.6.0] - 2026-11-08
 
