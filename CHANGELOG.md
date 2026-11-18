@@ -15,6 +15,15 @@ upgrading.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-18
+
+**Nothing to do.** Upgrade before or with `@particle-academy/fancy-pixel` 0.5.0,
+whose badge says "Powered by Fancy": this release recognises that wordmark and
+still recognises "Powered by Fancy UI", so a site verifies whichever pixel it
+carries. No API, schema or wire change. Lab-certified by `pixel-badge-v1`, the
+first lab test covering this package, which runs the detector on the wordmark a
+real browser rendered.
+
 ### Added
 
 - **The detector accepts the new badge wordmark, "Powered by Fancy".** `fancy-pixel`
