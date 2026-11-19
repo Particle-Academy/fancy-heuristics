@@ -15,6 +15,10 @@ upgrading.
 
 ## [Unreleased]
 
+### Changed
+
+- CI: re-pin org third-party allowlist to 2614224
+
 ## [0.7.0] - 2026-11-18
 
 **Nothing to do.** Upgrade before or with `@particle-academy/fancy-pixel` 0.5.0,
