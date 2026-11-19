@@ -17,6 +17,8 @@ upgrading.
 
 ### Changed
 
+- **BREAKING:** Laravel 13 is the minimum; an app on Laravel 12 or older can no longer install this; upgrade Laravel. On Laravel 13, do nothing.
+- Requires `laravel/framework` `^13.0`, because `src/` uses `Illuminate\Foundation`, which ships only in the framework. It moved from `require-dev` to `require`.
 - CI: re-pin org third-party allowlist to 2614224
 - Tests moved to Pest 5; `orchestra/testbench` removed from `require-dev`. The suite boots a hand-built Laravel app (`tests/TestCase.php`) on in-memory SQLite, and console tests read `Artisan::output()` instead of Mockery-backed expectations. `laravel/framework` is now a direct dev dependency, under the integration-framework carve-out (it used to arrive through testbench). No runtime change; nothing to do.
 
