@@ -8,6 +8,7 @@ use FancyHeuristics\Models\HeuristicsPixelPing;
 use FancyHeuristics\Models\HeuristicsSession;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Artisan;
 
 /*
  * Phase 0: retention is enforced by a command, pixel IP hashes are keyed,
@@ -46,7 +47,7 @@ it('prunes raw events, pointer samples and pings past their retention windows', 
     HeuristicsPixelPing::create(['site_key' => 's', 'style' => 'badge', 'mode' => 'floating', 'visible' => true, 'path' => '/', 'pinged_at' => Carbon::now()->subDays(40)]);
     HeuristicsPixelPing::create(['site_key' => 's', 'style' => 'badge', 'mode' => 'floating', 'visible' => true, 'path' => '/', 'pinged_at' => Carbon::now()->subDays(1)]);
 
-    $this->artisan('heuristics:prune')->assertSuccessful();
+    expect($this->artisan('heuristics:prune'))->toBe(0);
 
     expect(HeuristicsEvent::where('kind', 'click')->count())->toBe(1);
     expect(HeuristicsEvent::where('kind', 'pointer')->count())->toBe(1);
@@ -59,7 +60,7 @@ it('prunes sessions whose last activity is past the session window', function ()
     HeuristicsSession::create(['site_key' => 's', 'session_id' => 'old', 'last_event_at' => Carbon::now()->subDays(400), 'started_at' => Carbon::now()->subDays(400)]);
     HeuristicsSession::create(['site_key' => 's', 'session_id' => 'new', 'last_event_at' => Carbon::now()->subDays(1), 'started_at' => Carbon::now()->subDays(1)]);
 
-    $this->artisan('heuristics:prune')->assertSuccessful();
+    expect($this->artisan('heuristics:prune'))->toBe(0);
 
     expect(HeuristicsSession::pluck('session_id')->all())->toBe(['new']);
 });
@@ -67,9 +68,11 @@ it('prunes sessions whose last activity is past the session window', function ()
 it('reports what it would prune and deletes nothing on --dry-run', function () {
     seedAged('click', 400);
 
-    $this->artisan('heuristics:prune', ['--dry-run' => true])
-        ->expectsOutputToContain('1')
-        ->assertSuccessful();
+    $code = $this->artisan('heuristics:prune', ['--dry-run' => true]);
+    $output = Artisan::output();
+
+    expect($output)->toContain('1')
+        ->and($code)->toBe(0);
 
     expect(HeuristicsEvent::count())->toBe(1);
 });

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use FancyHeuristics\Models\HeuristicsEvent;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 
 /*
  * Phase 1: heuristics:backfill-taxonomy applies the ingest mapping to rows
@@ -28,11 +29,13 @@ it('reports what it would change and writes nothing on --dry-run', function () {
     legacyRow(['kind' => 'click', 'target_id' => 'buy', 'label' => 'Buy']);
     legacyRow(['kind' => 'click', 'actor' => 'agent', 'meta' => json_encode(['action' => 'grid_paint', 'via' => 'relay'])]);
 
-    $this->artisan('heuristics:backfill-taxonomy', ['--dry-run' => true])
-        ->expectsOutputToContain('would update 4')
-        ->expectsOutputToContain('unreliable legacy labels: 1')
-        ->expectsOutputToContain('agent rows no longer counted as clicks: 1')
-        ->assertSuccessful();
+    $code = $this->artisan('heuristics:backfill-taxonomy', ['--dry-run' => true]);
+    $output = Artisan::output();
+
+    expect($output)->toContain('would update 4')
+        ->and($output)->toContain('unreliable legacy labels: 1')
+        ->and($output)->toContain('agent rows no longer counted as clicks: 1')
+        ->and($code)->toBe(0);
 
     expect(HeuristicsEvent::whereNotNull('name')->count())->toBe(0);
 });
@@ -42,7 +45,7 @@ it('applies the ingest mapping to old rows and is idempotent', function () {
     $click = legacyRow(['kind' => 'click', 'label' => 'Header text']);
     $tool = legacyRow(['kind' => 'click', 'actor' => 'agent', 'meta' => json_encode(['action' => 'grid_paint', 'via' => 'relay'])]);
 
-    $this->artisan('heuristics:backfill-taxonomy')->assertSuccessful();
+    expect($this->artisan('heuristics:backfill-taxonomy'))->toBe(0);
 
     expect($view->fresh()->name)->toBe('ui.view');
     expect($view->fresh()->route_pattern)->toBe('/orders/:id');
@@ -52,16 +55,18 @@ it('applies the ingest mapping to old rows and is idempotent', function () {
     expect($tool->fresh()->name)->toBe('agent.tool');
     expect($tool->fresh()->kind)->toBe('agent');
 
-    $this->artisan('heuristics:backfill-taxonomy')
-        ->expectsOutputToContain('updated 0')
-        ->assertSuccessful();
+    $code = $this->artisan('heuristics:backfill-taxonomy');
+    $output = Artisan::output();
+
+    expect($output)->toContain('updated 0')
+        ->and($code)->toBe(0);
 });
 
 it('can be limited to one site', function () {
     legacyRow(['kind' => 'pageview']);
     legacyRow(['kind' => 'pageview', 'site_key' => 'other']);
 
-    $this->artisan('heuristics:backfill-taxonomy', ['--site' => 'other'])->assertSuccessful();
+    expect($this->artisan('heuristics:backfill-taxonomy', ['--site' => 'other']))->toBe(0);
 
     expect(HeuristicsEvent::where('site_key', 's')->first()->name)->toBeNull();
     expect(HeuristicsEvent::where('site_key', 'other')->first()->name)->toBe('ui.view');

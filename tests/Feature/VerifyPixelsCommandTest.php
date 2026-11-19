@@ -16,7 +16,7 @@ it('toggles a site visibility off when the pixel disappears', function () {
         'visible' => true,
     ]);
 
-    $this->artisan('heuristics:verify-pixels')->assertSuccessful();
+    expect($this->artisan('heuristics:verify-pixels'))->toBe(0);
 
     expect($site->refresh()->visible)->toBeFalse();
     expect($site->pixel_status)->toBe('failed');
@@ -33,7 +33,7 @@ it('toggles a site visibility back on when the pixel returns', function () {
         'visible' => false,
     ]);
 
-    $this->artisan('heuristics:verify-pixels')->assertSuccessful();
+    expect($this->artisan('heuristics:verify-pixels'))->toBe(0);
 
     expect($site->refresh()->visible)->toBeTrue();
     expect($site->pixel_status)->toBe('passed');
@@ -48,7 +48,7 @@ it('can target a single site by key', function () {
     $one = HeuristicsSite::create(['site_key' => 'one', 'url' => 'https://one.test', 'visible' => false]);
     $two = HeuristicsSite::create(['site_key' => 'two', 'url' => 'https://two.test', 'visible' => true]);
 
-    $this->artisan('heuristics:verify-pixels --site=one')->assertSuccessful();
+    expect($this->artisan('heuristics:verify-pixels --site=one'))->toBe(0);
 
     expect($one->refresh()->visible)->toBeTrue();
     // two was not touched

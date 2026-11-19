@@ -8,40 +8,73 @@ use FancyHeuristics\Contracts\HostResolver;
 use FancyHeuristics\Facades\Heuristics;
 use FancyHeuristics\HeuristicsServiceProvider;
 use FancyHeuristics\Tests\Support\FakeHostResolver;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Bootstrap\LoadConfiguration;
+use Illuminate\Foundation\Bootstrap\RegisterProviders;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Orchestra\Testbench\TestCase as Orchestra;
+use Illuminate\Foundation\Testing\TestCase as LaravelTestCase;
 
 /**
  * Base TestCase for Fancy Heuristics package tests.
  *
- * Uses Orchestra Testbench to provide a Laravel testing environment without
- * a full host application.
+ * A hand-built Laravel application (laravel/framework only, no
+ * orchestra/testbench) in a throwaway base path: no `.env` content, no package
+ * discovery, the framework's own default config plus the overrides below.
+ * In-memory SQLite and blank provider keys are forced.
  */
-abstract class TestCase extends Orchestra
+abstract class TestCase extends LaravelTestCase
 {
     use RefreshDatabase;
 
     /**
-     * @param  Application  $app
-     * @return array<int, class-string>
+     * `artisan()` returns the exit code. Laravel's output expectations are
+     * built on Mockery, which is not a dependency here; read
+     * `Artisan::output()` instead.
      */
-    protected function getPackageProviders($app): array
-    {
-        return [
-            HeuristicsServiceProvider::class,
-        ];
-    }
+    public $mockConsoleOutput = false;
 
-    /**
-     * @param  Application  $app
-     * @return array<string, class-string>
-     */
-    protected function getPackageAliases($app): array
+    public function createApplication(): Application
     {
-        return [
-            'Heuristics' => Heuristics::class,
-        ];
+        $base = sys_get_temp_dir().DIRECTORY_SEPARATOR.'fancy-heuristics-tests';
+        foreach (['bootstrap/cache', 'config', 'database', 'storage/framework/cache', 'storage/framework/views', 'storage/framework/sessions', 'storage/logs'] as $dir) {
+            if (! is_dir($base.'/'.$dir)) {
+                mkdir($base.'/'.$dir, 0777, true);
+            }
+        }
+        if (! is_file($base.'/.env')) {
+            touch($base.'/.env');
+        }
+
+        $app = Application::configure(basePath: $base)->withMiddleware()->withExceptions()->create();
+
+        $app->afterBootstrapping(LoadConfiguration::class, function (Application $app): void {
+            $config = $app['config'];
+            $config->set('app.env', 'testing');
+            $app->detectEnvironment(fn (): string => 'testing');
+            $config->set('app.providers', array_merge($config->get('app.providers', []), [HeuristicsServiceProvider::class]));
+            $config->set('app.aliases', array_merge($config->get('app.aliases', []), ['Heuristics' => Heuristics::class]));
+            $config->set('session.driver', 'array');
+            $config->set('queue.default', 'sync');
+            $config->set('mail.default', 'array');
+            $config->set('logging.default', 'null');
+            $config->set('services.anthropic.key', '');
+            $config->set('services.openai.key', '');
+        });
+
+        // After every provider has registered and before any boots.
+        $app->afterBootstrapping(RegisterProviders::class, function (Application $app): void {
+            $this->defineEnvironment($app);
+        });
+
+        $app->make(Kernel::class)->bootstrap();
+
+        // Routes registered while providers booted are not in the name index
+        // until it is refreshed (a host app's route loader does this).
+        $app['router']->getRoutes()->refreshNameLookups();
+        $app['router']->getRoutes()->refreshActionLookups();
+
+        return $app;
     }
 
     /**
